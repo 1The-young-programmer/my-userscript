@@ -25,8 +25,19 @@
         }
     }
     function addButton() {
-        // כולל את התמיכה בממשקים בעברית
-        const toolbars = document.querySelectorAll('.code-block-header, header:has(button[aria-label*="Colab"]), header:has(button[aria-label*="קולאב"]), header:has(button[tooltip*="Colab"]), .action-buttons, toolbar.extended-response-toolbar');
+        // כולל תמיכה בממשקים בעברית ובתצוגת הקנבס (Artifacts) החדשה
+        let toolbars = Array.from(document.querySelectorAll('.code-block-header, header:has(button[aria-label*="Colab"]), header:has(button[aria-label*="קולאב"]), header:has(button[tooltip*="Colab"]), .action-buttons, toolbar.extended-response-toolbar'));
+
+        // חיפוש חכם לכפתור ה"ייצוא ל-Colab" שמופיע בקנבס, כדי לתפוס את סרגל הכלים שלו
+        document.querySelectorAll('button').forEach(btn => {
+            const btnText = btn.innerText || "";
+            if (btnText.includes('Colab') || btnText.includes('קולאב')) {
+                const toolbarContainer = btn.parentElement;
+                if (toolbarContainer && !toolbars.includes(toolbarContainer)) {
+                    toolbars.push(toolbarContainer);
+                }
+            }
+        });
 
         toolbars.forEach(toolbar => {
             if (!toolbar.querySelector('.local-run-btn')) {
