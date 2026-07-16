@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Gemini Local Auto-Runner
 // @namespace    http://tampermonkey.net/
-// @version      3.3
+// @version      3.4
 // @description  מוסיף כפתור לג'מיני לשליחה והרצה אוטומטית של קוד במחשב המקומי (תומך בכל השפות)
 // @match        https://gemini.google.com/*
 // @updateURL    https://github.com/1The-young-programmer/my-userscript/raw/main/gemini_local_runner.user.js
@@ -93,31 +93,54 @@
             }
         });
 
-        // --- 2. הזרקה לחלון הקנבס המיוחד ---
-        let colabBtn = null;
-        const allButtons = document.querySelectorAll('button, span[role="button"], div[role="button"]');
-        
-        // חיפוש מדויק של כפתור ה-Colab כנקודת עוגן
-        for (let b of allButtons) {
-            const text = (b.textContent || "").toLowerCase();
-            const aria = (b.getAttribute('aria-label') || "").toLowerCase();
+        // --- 2. הזרקה ממוקדת לחלון הקנבס המיוחד (Artifacts) ---
+        // חיפוש עורך הקוד הייחודי של הקנבס
+        const canvasEditor = document.querySelector('.immersive-editor, .ProseMirror, .cm-content');
+        if (canvasEditor) {
+            // איתור כפתור ה-Colab על בסיס מבנה ה-DOM החדש שנראה בתמונה (כפתור Angular Material)
+            let colabBtn = null;
+            // הגישה היעילה ביותר היא חיפוש אלמנט עם מחלקת material ספציפית והטקסט הרלוונטי
+            const buttons = document.querySelectorAll('button.mdc-unelevated-button, button.mat-mdc-unelevated-button, a[role="button"]');
+            for (let el of buttons) {
+                 if (el.textContent && (el.textContent.includes('Colab') || el.textContent.includes('קולאב'))) {
+                     colabBtn = el;
+                     break;
+                 }
+            }
             
-            if ((text.includes('colab') || aria.includes('colab') || text.includes('קולאב')) && text.length < 40) {
-                colabBtn = b;
-                break;
+            if (colabBtn) {
+                // מציאת הסרגל (ההורה של הכפתור)
+                const targetToolbar = colabBtn.parentElement;
+                if (targetToolbar && !targetToolbar.querySelector('.local-run-btn')) {
+                    const btn = createRunButton();
+                    btn.onclick = (e) => handleRunClick(e, btn, true);
+                    // הזרקה לפני כפתור הקולאב
+                    targetToolbar.insertBefore(btn, colabBtn);
+                    
+                    // ניקוי כפתור צף אם היה קיים כגיבוי קודם
+                    const floatingBtn = document.getElementById('floating-local-run');
+                    if(floatingBtn) floatingBtn.remove();
+                }
+            } else {
+                 // Fallback: יצירת כפתור צף אם כפתור Colab לא אותר במבנה החדש
+                 if (!document.getElementById('floating-local-run')) {
+                    const btn = createRunButton();
+                    btn.id = 'floating-local-run';
+                    btn.innerHTML = '🚀 הפעל מקומית (צף)';
+                    btn.style.position = 'fixed';
+                    btn.style.top = '90px'; // מיקום בחלק העליון
+                    btn.style.left = '40px'; // בצד שמאל
+                    btn.style.zIndex = '999999';
+                    btn.style.boxShadow = '0 6px 16px rgba(0,0,0,0.3)';
+                    btn.style.border = '2px solid white';
+                    btn.onclick = (e) => handleRunClick(e, btn, true);
+                    document.body.appendChild(btn);
+                }
             }
-        }
-
-        // אם מצאנו את כפתור הקולאב, נשתול את שלנו ממש לידו
-        if (colabBtn) {
-            const canvasToolbar = colabBtn.parentElement;
-            if (canvasToolbar && !canvasToolbar.querySelector('.local-run-btn')) {
-                const btn = createRunButton();
-                btn.onclick = (e) => handleRunClick(e, btn, true);
-                
-                // הזרקה לפני כפתור הקולאב באותו שטח בדיוק
-                canvasToolbar.insertBefore(btn, colabBtn);
-            }
+        } else {
+            // ניקוי הכפתור הצף אם חלון הקנבס נסגר לחלוטין
+            const floatingBtn = document.getElementById('floating-local-run');
+            if (floatingBtn) floatingBtn.remove();
         }
     }
 
