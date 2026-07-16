@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Gemini Local Auto-Runner
 // @namespace    http://tampermonkey.net/
-// @version      3.4
+// @version      3.6
 // @description  מוסיף כפתור לג'מיני לשליחה והרצה אוטומטית של קוד במחשב המקומי (תומך בכל השפות)
 // @match        https://gemini.google.com/*
 // @updateURL    https://github.com/1The-young-programmer/my-userscript/raw/main/gemini_local_runner.user.js
@@ -12,7 +12,6 @@
 (function() {
     'use strict';
 
-    // פונקציה לשליחת הקוד לשרת המקומי 
     async function sendCodeToLocalRunner(codeText) {
         try {
             const response = await fetch('http://127.0.0.1:8080/update', {
@@ -27,7 +26,6 @@
         }
     }
 
-    // פונקציית עזר ליצירת העיצוב של הכפתור
     function createRunButton() {
         const btn = document.createElement('button');
         btn.className = 'local-run-btn';
@@ -38,26 +36,25 @@
         return btn;
     }
 
-    // הפעולה שתקרה בעת לחיצה על הכפתור
-    async function handleRunClick(e, btn, isCanvas) {
+    async function handleRunClick(e, btn) {
         e.preventDefault(); e.stopPropagation();
         
         let code = "";
         
-        if (isCanvas) {
-            // שאיבת קוד מתוך הקנבס
-            const canvasEditor = document.querySelector('.immersive-editor, .ProseMirror, .cm-content');
-            if (canvasEditor) code = canvasEditor.innerText || canvasEditor.textContent;
+        // ננסה לשאוב קוד קודם כל מהקנבס אם קיים
+        const cmContent = document.querySelector('.cm-content');
+        if (cmContent) {
+            code = cmContent.innerText || cmContent.textContent;
         } else {
-            // שאיבת קוד מבלוק רגיל בצ'אט
-            const codeBlock = btn.closest('.code-block-header').parentElement.querySelector('code, pre');
+            // אם לא בקנבס, נחפש בלוק קוד רגיל שהכפתור שייך אליו
+            const codeBlock = btn.closest('.code-block-header, .toolbar, header')?.parentElement?.querySelector('code, pre');
             if (codeBlock) code = codeBlock.innerText;
         }
 
-        // גיבוי אחרון אם הקוד הקודם נכשל
+        // גיבוי אחרון לשאיבת קוד
         if (!code || code.trim().length === 0) {
-            const anyEditor = document.querySelector('.cm-content, .ProseMirror');
-            if (anyEditor) code = anyEditor.innerText;
+            const anyEditor = document.querySelector('.immersive-editor, .ProseMirror');
+            if (anyEditor) code = anyEditor.innerText || anyEditor.textContent;
         }
 
         if (code && code.trim().length > 0) {
@@ -82,68 +79,78 @@
         }
     }
 
+    function findColabButton() {
+        // סריקה מתקדמת מבוססת טקסט
+        const allButtons = document.querySelectorAll('button, a, div[role="button"], span');
+        for (let b of allButtons) {
+            if (b.innerText && (b.innerText.includes('Colab') || b.innerText.includes('קולאב'))) {
+                // טיפוס למעלה כדי למצוא את כפתור האב האמיתי אם מצאנו רק תגית פנימית
+                let parent = b;
+                while(parent && parent.tagName !== 'BUTTON' && parent.tagName !== 'A' && parent.getAttribute('role') !== 'button') {
+                    if (parent.parentElement) parent = parent.parentElement;
+                    else break;
+                }
+                return parent || b;
+            }
+        }
+        return null;
+    }
+
     function injectButton() {
+        let isCanvasButtonInjected = false;
+
         // --- 1. הזרקה לבלוקי קוד רגילים בצ'אט ---
         const chatToolbars = document.querySelectorAll('.code-block-header');
         chatToolbars.forEach(toolbar => {
             if (!toolbar.querySelector('.local-run-btn')) {
                 const btn = createRunButton();
-                btn.onclick = (e) => handleRunClick(e, btn, false);
+                btn.onclick = (e) => handleRunClick(e, btn);
                 toolbar.prepend(btn);
             }
         });
 
-        // --- 2. הזרקה ממוקדת לחלון הקנבס המיוחד (Artifacts) ---
-        // חיפוש עורך הקוד הייחודי של הקנבס
-        const canvasEditor = document.querySelector('.immersive-editor, .ProseMirror, .cm-content');
-        if (canvasEditor) {
-            // איתור כפתור ה-Colab על בסיס מבנה ה-DOM החדש שנראה בתמונה (כפתור Angular Material)
-            let colabBtn = null;
-            // הגישה היעילה ביותר היא חיפוש אלמנט עם מחלקת material ספציפית והטקסט הרלוונטי
-            const buttons = document.querySelectorAll('button.mdc-unelevated-button, button.mat-mdc-unelevated-button, a[role="button"]');
-            for (let el of buttons) {
-                 if (el.textContent && (el.textContent.includes('Colab') || el.textContent.includes('קולאב'))) {
-                     colabBtn = el;
-                     break;
-                 }
+        // --- 2. הזרקה לקנבס (Artifacts) מבוססת חיפוש קולאב ---
+        const colabBtn = findColabButton();
+        if (colabBtn) {
+            const targetToolbar = colabBtn.parentElement;
+            if (targetToolbar && !targetToolbar.querySelector('.local-run-btn')) {
+                const btn = createRunButton();
+                btn.onclick = (e) => handleRunClick(e, btn);
+                targetToolbar.insertBefore(btn, colabBtn);
+                isCanvasButtonInjected = true;
+                
+                // הסרת כפתור צף אם היה קיים
+                const floatingBtn = document.getElementById('floating-local-run');
+                if(floatingBtn) floatingBtn.remove();
+            } else if (targetToolbar && targetToolbar.querySelector('.local-run-btn')) {
+                isCanvasButtonInjected = true;
             }
-            
-            if (colabBtn) {
-                // מציאת הסרגל (ההורה של הכפתור)
-                const targetToolbar = colabBtn.parentElement;
-                if (targetToolbar && !targetToolbar.querySelector('.local-run-btn')) {
-                    const btn = createRunButton();
-                    btn.onclick = (e) => handleRunClick(e, btn, true);
-                    // הזרקה לפני כפתור הקולאב
-                    targetToolbar.insertBefore(btn, colabBtn);
-                    
-                    // ניקוי כפתור צף אם היה קיים כגיבוי קודם
-                    const floatingBtn = document.getElementById('floating-local-run');
-                    if(floatingBtn) floatingBtn.remove();
-                }
-            } else {
-                 // Fallback: יצירת כפתור צף אם כפתור Colab לא אותר במבנה החדש
-                 if (!document.getElementById('floating-local-run')) {
-                    const btn = createRunButton();
-                    btn.id = 'floating-local-run';
-                    btn.innerHTML = '🚀 הפעל מקומית (צף)';
-                    btn.style.position = 'fixed';
-                    btn.style.top = '90px'; // מיקום בחלק העליון
-                    btn.style.left = '40px'; // בצד שמאל
-                    btn.style.zIndex = '999999';
-                    btn.style.boxShadow = '0 6px 16px rgba(0,0,0,0.3)';
-                    btn.style.border = '2px solid white';
-                    btn.onclick = (e) => handleRunClick(e, btn, true);
-                    document.body.appendChild(btn);
-                }
+        }
+
+        // --- 3. גיבוי חירום (כפתור צף) ---
+        // אם לא מצאנו את הקולאב אבל מזהים שעורך קוד גדול פתוח כרגע במסך
+        const isCodeEditorOpen = document.querySelector('.cm-content, .immersive-editor');
+        if (!isCanvasButtonInjected && isCodeEditorOpen) {
+            if (!document.getElementById('floating-local-run')) {
+                const btn = createRunButton();
+                btn.id = 'floating-local-run';
+                btn.innerHTML = '🚀 הפעל מקומית (צף)';
+                btn.style.position = 'fixed';
+                btn.style.top = '90px';
+                btn.style.left = '40px';
+                btn.style.zIndex = '999999';
+                btn.style.boxShadow = '0 6px 16px rgba(0,0,0,0.3)';
+                btn.style.border = '2px solid white';
+                btn.onclick = (e) => handleRunClick(e, btn);
+                document.body.appendChild(btn);
             }
-        } else {
-            // ניקוי הכפתור הצף אם חלון הקנבס נסגר לחלוטין
+        } else if (isCanvasButtonInjected || !isCodeEditorOpen) {
+            // ניקוי הכפתור הצף כשאין בו צורך
             const floatingBtn = document.getElementById('floating-local-run');
             if (floatingBtn) floatingBtn.remove();
         }
     }
 
-    // ריצה רציפה ברקע לאיתור השינויים בדף
-    setInterval(injectButton, 1000);
+    // סריקה מהירה כל חצי שנייה כדי להבטיח תגובה מיידית לפתיחת הקנבס
+    setInterval(injectButton, 500);
 })();
