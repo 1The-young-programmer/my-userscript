@@ -1,9 +1,11 @@
 // ==UserScript==
 // @name         Gemini Local Auto-Runner
 // @namespace    http://tampermonkey.net/
-// @version      3.0
+// @version      3.1
 // @description  מוסיף כפתור לג'מיני לשליחה והרצה אוטומטית של קוד במחשב המקומי
 // @match        https://gemini.google.com/*
+// @updateURL    https://github.com/1The-young-programmer/my-userscript/raw/main/gemini_local_runner.user.js
+// @downloadURL  https://github.com/1The-young-programmer/my-userscript/raw/main/gemini_local_runner.user.js
 // @grant        none
 // ==/UserScript==
 
@@ -23,7 +25,8 @@
         }
     }
     function addButton() {
-        const toolbars = document.querySelectorAll('.code-block-header, header:has(button[aria-label*="Colab"]), .action-buttons, toolbar.extended-response-toolbar');
+        // כולל את התמיכה בממשקים בעברית
+        const toolbars = document.querySelectorAll('.code-block-header, header:has(button[aria-label*="Colab"]), header:has(button[aria-label*="קולאב"]), header:has(button[tooltip*="Colab"]), .action-buttons, toolbar.extended-response-toolbar');
 
         toolbars.forEach(toolbar => {
             if (!toolbar.querySelector('.local-run-btn')) {
