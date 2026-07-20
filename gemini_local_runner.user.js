@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Gemini Local Auto-Runner
 // @namespace    http://tampermonkey.net/
-// @version      4.0
-// @description  מוסיף כפתור לג'מיני לשליחה והרצה אוטומטית של קוד במחשב המקומי (תומך בכל השפות ומעקף Shadow DOM)
+// @version      6.0
+// @description  Universal Floating Button - עוקף את חסימות הממשק עם כפתור מרחף קבוע
 // @match        https://gemini.google.com/*
 // @updateURL    https://github.com/1The-young-programmer/my-userscript/raw/main/gemini_local_runner.user.js
 // @downloadURL  https://github.com/1The-young-programmer/my-userscript/raw/main/gemini_local_runner.user.js
@@ -26,155 +26,133 @@
         }
     }
 
-    function createRunButton() {
-        const btn = document.createElement('button');
-        btn.className = 'local-run-btn';
-        btn.innerHTML = '🚀 הפעל מקומית';
-        btn.style.cssText = `
-            background-color: #1a73e8; color: white; border: none; 
-            padding: 6px 16px; border-radius: 18px; cursor: pointer; 
-            margin: 0 10px; font-family: inherit; font-size: 13px; 
-            font-weight: 600; display: inline-flex; align-items: center; 
-            gap: 6px; box-shadow: 0 1px 3px rgba(0,0,0,0.12); 
-            transition: background 0.2s; z-index: 10000;
-        `;
-        btn.onmouseover = () => btn.style.backgroundColor = '#1557b0';
-        btn.onmouseout = () => btn.style.backgroundColor = '#1a73e8';
-        return btn;
-    }
-
-    async function handleRunClick(e, btn) {
-        e.preventDefault(); e.stopPropagation();
-        let code = "";
-        
-        // עדיפות עליונה: חיפוש בעורכי הקנבס המודרניים
-        const cmContent = document.querySelector('.cm-content');
-        if (cmContent) {
-            code = cmContent.innerText || cmContent.textContent;
-        } else {
-            // אם לא מצא, מנסה לחפש את הבלוק הקרוב לכפתור
-            const codeBlock = btn.closest('.code-block-header, .toolbar, header, canvas-ui')?.parentElement?.querySelector('code, pre');
-            if (codeBlock) code = codeBlock.innerText;
-        }
-
-        // גיבוי אחרון: חיפוש כללי
-        if (!code || code.trim().length === 0) {
-            const anyEditor = document.querySelector('.immersive-editor, .ProseMirror');
-            if (anyEditor) code = anyEditor.innerText || anyEditor.textContent;
-        }
-
-        if (code && code.trim().length > 0) {
-            btn.innerHTML = 'מריץ... ⏳';
-            btn.style.backgroundColor = '#f59e0b';
-            
-            const success = await sendCodeToLocalRunner(code);
-            if(success) {
-                btn.innerHTML = '✅ בוצע!';
-                btn.style.backgroundColor = '#10b981';
-            } else {
-                btn.innerHTML = '❌ שגיאה בשרת';
-                btn.style.backgroundColor = '#ef4444';
-            }
-            
-            setTimeout(() => {
-                btn.innerHTML = '🚀 הפעל מקומית';
-                btn.style.backgroundColor = '#1a73e8';
-            }, 3500);
-        } else {
-            alert("לא נמצא קוד להרצה על המסך.");
-        }
-    }
-
-    function injectButton() {
-        let isCanvasButtonInjected = false;
-
-        // 1. הזרקה לבלוקי קוד רגילים בצ'אט
-        const chatToolbars = document.querySelectorAll('.code-block-header');
-        chatToolbars.forEach(toolbar => {
-            if (!toolbar.querySelector('.local-run-btn')) {
-                const btn = createRunButton();
-                btn.onclick = (e) => handleRunClick(e, btn);
-                toolbar.prepend(btn);
-            }
-        });
-
-        // 2. חיפוש אגרסיבי של סרגל הכלים בקנבס (כולל Shadow DOM או אלמנטים מותאמים)
-        // חיפוש טקסטואלי של Colab בכל כפתור או תגית רלוונטית
-        const colabKeywords = ['Colab', 'קולאב'];
-        let colabButtonFound = null;
-        const allPossibleButtons = document.querySelectorAll('button, a, span, div[role="button"], mat-icon');
-        
-        for (let el of allPossibleButtons) {
-            if (el.textContent && colabKeywords.some(keyword => el.textContent.includes(keyword))) {
-                colabButtonFound = el;
-                break;
-            }
-        }
-
-        if (colabButtonFound) {
-            // נמצא כפתור קולאב, מחפש את מיכל האב שמתאים לסרגל כלים
-            let targetToolbar = colabButtonFound.parentElement;
-            // עולה למעלה עד שמוצא אזור שמכיל כפתורים נוספים
-            let depth = 0;
-            while(targetToolbar && depth < 5) {
-                if(targetToolbar.querySelectorAll('button, a').length > 1 || targetToolbar.style.display === 'flex') {
-                    break;
+    // אלגוריתם שסורק כל פינה בעמוד כדי למצוא עורכי קוד, גם בתוך Shadow DOM
+    function getAllCodeBlocks() {
+        const results = [];
+        function searchNode(node) {
+            if (node.nodeType === 1) {
+                // חיפוש עורכי קוד מודרניים או בלוקים רגילים
+                if (node.matches('.cm-content, .monaco-editor, .ProseMirror, pre code, .code-block code')) {
+                    results.push(node);
                 }
-                targetToolbar = targetToolbar.parentElement;
-                depth++;
             }
-
-            if (targetToolbar && !targetToolbar.querySelector('.local-run-btn')) {
-                const btn = createRunButton();
-                btn.onclick = (e) => handleRunClick(e, btn);
-                targetToolbar.insertBefore(btn, targetToolbar.firstChild); // מכניס להתחלה
-                isCanvasButtonInjected = true;
-                removeFloatingButton();
-            } else if (targetToolbar && targetToolbar.querySelector('.local-run-btn')) {
-                isCanvasButtonInjected = true; // הכפתור כבר קיים
+            if (node.shadowRoot) {
+                searchNode(node.shadowRoot);
+            }
+            if (node.children) {
+                for (let i = 0; i < node.children.length; i++) {
+                    searchNode(node.children[i]);
+                }
             }
         }
+        searchNode(document.body);
+        return results;
+    }
 
-        // 3. גיבוי חירום מוחלט (כפתור צף) אם אנחנו יודעים שהקנבס פתוח אבל לא מצאנו את הקולאב
-        const isCodeEditorOpen = document.querySelector('.cm-content, .immersive-editor');
-        if (!isCanvasButtonInjected && isCodeEditorOpen) {
-            createFloatingButton();
-        } else if (isCanvasButtonInjected || !isCodeEditorOpen) {
-            removeFloatingButton();
+    function extractBestCode() {
+        // קודם כל נבדוק אם המשתמש סימן טקסט עם העכבר (הכי מדויק)
+        const selection = window.getSelection().toString();
+        if (selection && selection.length > 10) {
+            return selection;
         }
-    }
 
-    function createFloatingButton() {
-        if (!document.getElementById('floating-local-run')) {
-            const btn = createRunButton();
-            btn.id = 'floating-local-run';
-            btn.innerHTML = '🚀 הפעל (צף)';
-            btn.style.position = 'fixed';
-            btn.style.top = '100px';
-            btn.style.left = '50px';
-            btn.style.zIndex = '999999';
-            btn.style.boxShadow = '0 6px 16px rgba(0,0,0,0.4)';
-            btn.style.border = '2px solid white';
-            btn.onclick = (e) => handleRunClick(e, btn);
-            document.body.appendChild(btn);
+        // אם לא סימן כלום, נחפש את כל בלוקי הקוד בעמוד
+        const codeBlocks = getAllCodeBlocks();
+        
+        // נמצא את בלוק הקוד הארוך ביותר או האחרון (בדרך כלל מה שהמשתמש רוצה להריץ)
+        let bestCode = "";
+        for (let i = codeBlocks.length - 1; i >= 0; i--) {
+            let el = codeBlocks[i];
+            let text = el.innerText || el.textContent;
+            if (text && text.trim().length > 10) {
+                bestCode = text;
+                break; // תופס את בלוק הקוד הרלוונטי האחרון
+            }
         }
+        return bestCode;
     }
 
-    function removeFloatingButton() {
-        const floatingBtn = document.getElementById('floating-local-run');
-        if (floatingBtn) floatingBtn.remove();
+    function createUniversalFloatingButton() {
+        // נוודא שלא ניצור פעמיים
+        if (document.getElementById('gemini-universal-runner')) return;
+
+        const btn = document.createElement('button');
+        btn.id = 'gemini-universal-runner';
+        btn.innerHTML = '🚀 <span style="font-family: inherit;">הפעל קוד</span>';
+        
+        // עיצוב מרחף מודרני שלא מפריע לעין
+        btn.style.cssText = `
+            position: fixed;
+            bottom: 24px;
+            left: 24px;
+            background: linear-gradient(135deg, #1a73e8, #1557b0);
+            color: white;
+            border: none;
+            padding: 12px 20px;
+            border-radius: 50px;
+            cursor: pointer;
+            font-size: 15px;
+            font-weight: bold;
+            box-shadow: 0 4px 14px rgba(26, 115, 232, 0.4);
+            z-index: 2147483647; /* המספר הכי גבוה שיש כדי שתמיד יהיה מעל הכל */
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            transition: all 0.2s ease-in-out;
+            opacity: 0.85; /* חצי שקוף כדי לא להסתיר תוכן */
+        `;
+
+        // אפקטים של מעבר עכבר
+        btn.onmouseover = () => {
+            btn.style.opacity = '1';
+            btn.style.transform = 'scale(1.05)';
+        };
+        btn.onmouseout = () => {
+            btn.style.opacity = '0.85';
+            btn.style.transform = 'scale(1)';
+        };
+
+        btn.onclick = async (e) => {
+            e.preventDefault();
+            
+            const originalHtml = btn.innerHTML;
+            btn.innerHTML = '⏳ <span style="font-family: inherit;">שואב קוד...</span>';
+            btn.style.background = 'linear-gradient(135deg, #f59e0b, #d97706)'; // כתום
+
+            const codeToRun = extractBestCode();
+
+            if (codeToRun && codeToRun.trim().length > 0) {
+                btn.innerHTML = '⚙️ <span style="font-family: inherit;">מריץ...</span>';
+                
+                const success = await sendCodeToLocalRunner(codeToRun);
+                if (success) {
+                    btn.innerHTML = '✅ <span style="font-family: inherit;">בוצע!</span>';
+                    btn.style.background = 'linear-gradient(135deg, #10b981, #059669)'; // ירוק
+                } else {
+                    btn.innerHTML = '❌ <span style="font-family: inherit;">שגיאה!</span>';
+                    btn.style.background = 'linear-gradient(135deg, #ef4444, #dc2626)'; // אדום
+                }
+            } else {
+                alert("לא מצאתי קוד על המסך להריץ.\nנסה לסמן את הקוד שאתה רוצה להריץ עם העכבר, ואז ללחוץ שוב.");
+                btn.innerHTML = originalHtml;
+                btn.style.background = 'linear-gradient(135deg, #1a73e8, #1557b0)';
+                return;
+            }
+
+            // החזרה למצב רגיל אחרי 3 שניות
+            setTimeout(() => {
+                btn.innerHTML = originalHtml;
+                btn.style.background = 'linear-gradient(135deg, #1a73e8, #1557b0)';
+            }, 3000);
+        };
+
+        document.body.appendChild(btn);
     }
 
-    // במקום רק setInterval, נשתמש גם ב-MutationObserver כדי להגיב מיד לשינויים ב-DOM
-    const observer = new MutationObserver((mutations) => {
-        // מריץ את בדיקת ההזרקה כשיש שינוי מהותי במסך
-        injectButton();
-    });
-
-    // מתחיל להאזין לכל העמוד
-    observer.observe(document.body, { childList: true, subtree: true });
-
-    // גיבוי ל-Observer, בדיקה מחזורית איטית יותר
-    setInterval(injectButton, 1500);
+    // מפעיל את יצירת הכפתור מיד
+    createUniversalFloatingButton();
+    
+    // מוודא שהכפתור נשאר שם גם אם ג'מיני מנקה את העמוד
+    setInterval(createUniversalFloatingButton, 2000);
 
 })();
